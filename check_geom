@@ -1,0 +1,143 @@
+#!/bin/sh
+
+##    This program is free software: you can redistribute it and/or modify
+##    it under the terms of the GNU General Public License as published by
+##    the Free Software Foundation, either version 3 of the License, or
+##    (at your option) any later version. For further details see:
+##    <http://www.gnu.org/licenses/>.
+##
+##    This program is distributed in the hope that it will be useful,
+##    but WITHOUT ANY WARRANTY; without even the implied warranty of
+##    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+##    GNU General Public License for more details.
+
+# =============
+# check_geom
+# =============
+# * written by Silver Salonen, Estonia
+
+# version 1.2 (11.Dec.2009)
+# * append " (SYNCHRONIZING - <percentage>)" to status if some of the disks is/are syncing
+# * in case of a synchronizing array, status 1 (WARNING) is returned
+# * in case of -v, don't echo about the state additionally
+
+# (09.Apr.2009)
+# include licence
+
+# version 1.1.1 (27.Sep.2007)
+# * fix typo 'grmirror' in printUsage().
+# * mention graid in printUsage().
+
+# version 1.1 (05.Jul.2007)
+# * add type graid
+# * delete unused functions that were copied from the check_pf.sh plugin ;)
+
+# version 1.0.1 (27.Apr.2007)
+# * allow GEOM state to be "COMPLETE" also.
+
+# version 1.0 (17.Apr.2007)
+# plugin return codes:
+# 0     OK
+# 1     Warning
+# 2     Critical
+# 3     Unknown
+
+while getopts "ht:n:v" opt
+do
+        case $opt in
+                h)
+                        showhelp=1
+                        break
+                ;;
+                t)
+                        type="$OPTARG"
+                ;;
+                n)
+                        name="$OPTARG"
+                ;;
+                v)
+                        verbose=1
+                ;;
+        esac
+done
+
+printUsage() {
+        echo "Usage: $0 [-h] -t (gstripe|gmirror|graid) -n <name> [-v]"
+        echo ""
+        echo "Example: $0 -t gstripe -n gs0"
+}
+
+printHelp() {
+        printUsage
+        echo ""
+        echo "This plugin checks state and status of a GEOM device (currently gstripe, gmirror or graid)"
+        echo ""
+        echo "For more details, see inside the script ;)"
+        echo ""
+        exit 3
+}
+
+if [ "$showhelp" = "1" ]; then
+        printHelp
+        exit 3
+fi
+
+if [ ! "$type" ] || [ ! "$name" ]; then
+        printUsage
+        exit 3
+fi
+
+case "$type" in
+        gmirror)
+                geom_exec=/sbin/gmirror
+        ;;
+        gstripe)
+                geom_exec=/sbin/gstripe
+        ;;
+        graid)
+                geom_exec=/sbin/graid
+        ;;
+        *)
+                echo "$type: unknown type"
+                        exit 3
+        ;;
+esac
+
+if [ ! -x $geom_exec ]; then
+        echo "$geom_exec: command not found"
+        exit 3
+fi
+
+geom_list=`$geom_exec list $name`
+geom_name=`echo "$geom_list" | grep "^Geom name"`
+geom_state=`echo "$geom_list" | grep "^State"`
+geom_status=`echo "$geom_list" | grep "\<Status"`
+if ( echo "$geom_list" | grep "^No such geom" > /dev/null ); then
+        echo "$geom_list"
+        exit 3
+fi
+
+ret_code=0
+
+geom_state_only=`echo "$geom_state" | cut -d ':' -f 2 | sed 's/^ //'`
+if [ "$geom_state_only" != "UP" ] && [ "$geom_state_only" != "COMPLETE" ]; then
+        if ( echo "$geom_list" | grep "\<State: SYNCHRONIZING" > /dev/null ); then
+                synced="`echo "$geom_list" | grep "\<Synchronized" | cut -d ':' -f 2`"
+                geom_state="$geom_state (SYNCHRONIZING:$synced)"
+                ret_code=1
+        else
+                ret_code=2
+        fi
+fi
+
+if [ "$verbose" ]; then
+        geom_status_total=`echo "$geom_status" | sed "s/.*Total=\([0-9]*\).*/\\1/g"`
+        geom_status_online=`echo "$geom_status" | sed "s/.*Online=\([0-9]*\).*/\\1/g"`
+        if [ ! $geom_status_total -eq $geom_status_online ]; then
+                echo -n "Number of disks in array is not what it should be! "
+        fi
+        ret_code=2
+fi
+
+echo "$geom_name; $geom_state"
+exit $ret_code
