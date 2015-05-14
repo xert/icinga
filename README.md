@@ -23,6 +23,11 @@ define command{
         command_name    ssh-check-raid-mpt
         command_line    $USER1$/check_by_ssh -p$_HOST_SSH_PORT$ -t 20 -H $HOSTADDRESS$ -C "$USER5$/check_mpt -u $ARG1$"
 }
+
+define command{
+        command_name    ssh-check-raid-geom
+        command_line    $USER1$/check_by_ssh -p$_HOST_SSH_PORT$ -t 20 -H $HOSTADDRESS$ -C "$USER5$/check_geom -t $ARG1$ -n $ARG2"
+}
 ```
 
 ```
@@ -59,6 +64,13 @@ define service {
         notification_interval   720
 }
 
+define service {
+        use                     generic-12hours
+        host_name               host.domain
+        service_description     host RAID
+        check_command           ssh-check-raid-geom!graid!Intel-123456789
+        notification_interval   720
+}
 
 
 ```
