@@ -67,7 +67,7 @@ if ($opt_d) {
         }
 
         if($opt_i =~
-            /ata|scsi|3ware|cciss|areca|sat|marvell|usbsunplus|hpt|usbcypress|usbsunplus/){
+            /ata|scsi|3ware|cciss|areca|sat|marvell|usbsunplus|hpt|usbcypress|usbsunplus|auto/){
                 $interface = $opt_i;
         }
         else{
