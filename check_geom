@@ -55,9 +55,6 @@ do
                 n)
                         name="$OPTARG"
                 ;;
-                v)
-                        verbose=1
-                ;;
         esac
 done
 
@@ -120,7 +117,7 @@ fi
 ret_code=0
 
 geom_state_only=`echo "$geom_state" | cut -d ':' -f 2 | sed 's/^ //'`
-if [ "$geom_state_only" != "UP" ] && [ "$geom_state_only" != "COMPLETE" ]; then
+if [ "$geom_state_only" != "OPTIMAL" ] && [ "$geom_state_only" != "UP" ] && [ "$geom_state_only" != "COMPLETE" ]; then
         if ( echo "$geom_list" | grep "\<State: SYNCHRONIZING" > /dev/null ); then
                 synced="`echo "$geom_list" | grep "\<Synchronized" | cut -d ':' -f 2`"
                 geom_state="$geom_state (SYNCHRONIZING:$synced)"
@@ -128,15 +125,6 @@ if [ "$geom_state_only" != "UP" ] && [ "$geom_state_only" != "COMPLETE" ]; then
         else
                 ret_code=2
         fi
-fi
-
-if [ "$verbose" ]; then
-        geom_status_total=`echo "$geom_status" | sed "s/.*Total=\([0-9]*\).*/\\1/g"`
-        geom_status_online=`echo "$geom_status" | sed "s/.*Online=\([0-9]*\).*/\\1/g"`
-        if [ ! $geom_status_total -eq $geom_status_online ]; then
-                echo -n "Number of disks in array is not what it should be! "
-        fi
-        ret_code=2
 fi
 
 echo "$geom_name; $geom_state"
