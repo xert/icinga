@@ -22,7 +22,7 @@ $p->add_arg(
 );
 
 $p->add_arg(
-    spec    => 'unit|u',
+    spec    => 'unit|u=i',
     help    => "--unit, -u\n\tUnit number",
     default => 0,
 );
