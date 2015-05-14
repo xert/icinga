@@ -1,0 +1,162 @@
+#!/usr/bin/perl -w
+
+# check_mfi Nagios plugin
+# Copyright (C) 2011  Jonathan Delgado, delgado@molbio.mgh.harvard.edu
+# 
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 2
+# of the License, or (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+# 
+# 
+# Nagios plugin to monitor the status of volumes attached to an LSI Megaraid SAS 
+# controller utilizing the mfi driver under FreeBSD. You need to be running a 
+# version of FreeBSD that includes mfiutil (FreeBSD 7.3+ or 8.0+)
+#
+#
+# $Author: delgado $
+# $Revision: #2 $ $Date: 2011/08/08 $
+
+use strict;
+use Getopt::Std;
+use lib qw(/usr/local/libexec/nagios); # path to Nagios plugin and utils.pm on fbsd
+use utils qw(%ERRORS);
+
+our($opt_h, $opt_u, $opt_s);
+
+
+getopts('hu:s:');
+
+if ( $opt_h ) {
+        print "Usage: $0 [-u #] [-s #]\n";
+        print "       -u is the number of RAID controllers installed\n";
+        print "       -s is how many hotspares are attached to the controller\n";
+        exit;
+}
+
+my $mfiutilbin = '/usr/sbin/mfiutil';  # the default path to the mfiutil binary
+my $mfiutil = "sudo $mfiutilbin";      # how we actually call mfiutil
+
+my $adapters = 1;
+my $hotspares = 0;
+my $hotsparecount = 0;
+my $pdgood = 0;
+my $pdbad = 0;
+my $pdugly = 0;
+my $pdcount = 0;
+my $result = '';
+my $status = 'OK';
+
+if ( $opt_s ) {
+        $hotspares = $opt_s;
+}
+if ( $opt_u ) {
+        $adapters = $opt_u;
+}
+
+sub max_state ($$);
+sub exitreport($$);
+
+unless ( -e $mfiutilbin ) {
+        exitreport('UNKNOWN', "error: Could not execute $mfiutil ");
+}
+
+ADAPTER: for ( my $adp = 0; $adp < $adapters; $adp++ ) {
+
+        open(VINFO, "$mfiutil -u $adp show volumes |") 
+                        || exitreport('UNKNOWN', "error: Could not execute $mfiutil -u $adp show volumes ");
+
+        my ($id, $size, $level, $stripe, $state, $cache, $name);
+
+        while (<VINFO>) {
+                if ( m/^\s+mfid(\d+)\s+\(\s+(\d+\w+)\)\s+([A-Z0-9\-]+)\s+(\w+)\s+(OFFLINE|OPTIMAL|PARTIALLY DEGRADED|DEGRADED)\s+.*$/ ) {
+                        ($id, $size, $level, $state) = ($1, $2, $3, $5);
+
+                        if ( ( $state eq 'PARTIALLY DEGRADED' ) || ( $state eq 'OFFLINE' ) ) {
+                                $status = max_state($status, 'WARNING');
+                        } elsif ( $state eq 'DEGRADED' ) {
+                                $status = 'CRITICAL';
+                        }
+
+                        $result .= "mfid$id:$size:$level:$state ";
+                }
+        }
+        close VINFO;
+
+        open (DINFO, "$mfiutil -u $adp show drives |") 
+                        || exitreport('UNKNOWN', "error: Could not execute $mfiutil -u $adp show drives ");
+
+        my ($dstate, $enclosure, $slot);
+        while (<DINFO>) {
+                if ( m/^\(\s+(\d+\w+)\)\s+(.+)\s+<.+>\s+\w+\s+enclosure\s+(\d+),\s+slot\s+(\d+).*$/ ) {
+                        ($dstate, $enclosure, $slot) = ($2, $3, $4);
+
+                        $pdcount++;
+                        if ( ($dstate eq 'UNCONFIGURED BAD') || ($dstate eq 'REBUILD') || ($dstate eq 'OFFLINE')) {
+                                $status = max_state($status, 'WARNING');
+                                $pdugly++;
+                                print "Ugly $dstate Enc $enclosure Slot $slot\n";
+                        } elsif ($dstate eq 'FAILED') {
+                                $status = 'CRITICAL';
+                                $pdbad++;
+                        } elsif ($dstate eq 'HOT SPARE') {
+                                $hotsparecount++;
+                                $pdgood++;
+                        } elsif (($dstate eq 'ONLINE') || ($dstate eq 'UNCONFIGURED GOOD')) {
+                                $pdgood++;
+                        }
+                }
+        }
+        close DINFO;
+
+}
+
+$result .= "Drives:$pdcount ";
+
+if ( ($pdbad > 0) || ($pdugly > 0) ) {
+        $result .= "($pdgood Good, $pdbad Bad, $pdugly Ugly) ";
+}
+
+# Do we have as many hotspares as expected (if any)
+if ( $hotspares ) {
+        if ( $hotsparecount < $hotspares ) {
+                $status = max_state($status, 'WARNING');
+                $result .= "Hotspare(s):$hotsparecount (of $hotspares)";
+        } else {
+                $result .= "Hotspare(s):$hotsparecount";
+        }
+}
+
+exitreport($status, $result);
+
+sub max_state ($$) {
+        my ($current, $compare) = @_;
+
+        if (($compare eq 'CRITICAL') || ($current eq 'CRITICAL')) {
+                return 'CRITICAL';
+        } elsif ($compare eq 'OK') {
+                return $current;
+        } elsif ($compare eq 'WARNING') {
+                return 'WARNING';
+        } elsif (($compare eq 'UNKNOWN') && ($current eq 'OK')) {
+                return 'UNKNOWN';
+        } else {
+                return $current;
+        }
+}
+
+sub exitreport ($$) {
+        my ($status, $message) = @_;
+
+        print STDOUT "$status: $message\n";
+        exit $ERRORS{$status};
+}
